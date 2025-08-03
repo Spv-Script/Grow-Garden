@@ -1,573 +1,613 @@
--- Rectangle Sectioned Visual Spawner Interface with Collapsible Sections
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
 
--- Load spawner library
-local Spawner = loadstring(game:HttpGet("https://codeberg.org/GrowAFilipino/GrowAGarden/raw/branch/main/Spawner.lua"))()
+local CONFIG = {
+    UI_NAME = "ProfessionalUI",
+    VERSION = "2.1.0",
+    THEME = {
+        PRIMARY = Color3.fromRGB(25, 30, 40),
+        SECONDARY = Color3.fromRGB(35, 42, 56),
+        ACCENT = Color3.fromRGB(64, 158, 255),
+        SUCCESS = Color3.fromRGB(34, 197, 94),
+        WARNING = Color3.fromRGB(251, 191, 36),
+        DANGER = Color3.fromRGB(239, 68, 68),
+        TEXT_PRIMARY = Color3.fromRGB(248, 250, 252),
+        TEXT_SECONDARY = Color3.fromRGB(148, 163, 184),
+        BORDER = Color3.fromRGB(51, 65, 85)
+    },
+    ANIMATIONS = {
+        FAST = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        MEDIUM = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        SLOW = TweenInfo.new(0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+    },
+    DIMENSIONS = {
+        WIDTH = 320,
+        HEIGHT = 220,
+        TITLE_HEIGHT = 40,
+        BORDER_RADIUS = 12
+    }
+}
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
--- Main GUI container
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "SpawnerInterface Must stay in serv for 5 min to save"
-screenGui.Parent = playerGui
-screenGui.ResetOnSpawn = false
+local UIManager = {}
+UIManager.__index = UIManager
 
--- Primary frame (rectangle) - made taller for vertical layout
-local mainFrame = Instance.new("Frame")
-mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 320, 0, 320)
-mainFrame.Position = UDim2.new(0.5, -160, 0.5, -160)
-mainFrame.BackgroundColor3 = Color3.fromRGB(16, 16, 22)
-mainFrame.BorderSizePixel = 0
-mainFrame.Parent = screenGui
+function UIManager:new()
+    local self = setmetatable({}, UIManager)
+    self.isMinimized = false
+    self.isDragging = false
+    self.originalSize = UDim2.new(0, CONFIG.DIMENSIONS.WIDTH, 0, CONFIG.DIMENSIONS.HEIGHT)
+    self:initialize()
+    return self
+end
 
--- Frame styling (minimal corner radius for rectangle look)
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 4)
-corner.Parent = mainFrame
+function UIManager:initialize()
+    self:createScreenGui()
+    self:createMainFrame()
+    self:createTitleBar()
+    self:createContentArea()
+    self:setupEventHandlers()
+    self:playEntranceAnimation()
+end
 
--- Border
-local mainStroke = Instance.new("UIStroke")
-mainStroke.Color = Color3.fromRGB(50, 50, 65)
-mainStroke.Thickness = 1
-mainStroke.Transparency = 0.5
-mainStroke.Parent = mainFrame
-
--- Header section
-local header = Instance.new("Frame")
-header.Name = "Header"
-header.Size = UDim2.new(1, 0, 0, 35)
-header.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
-header.BorderSizePixel = 0
-header.Parent = mainFrame
-
-local headerCorner = Instance.new("UICorner")
-headerCorner.CornerRadius = UDim.new(0, 4)
-headerCorner.Parent = header
-
--- Header bottom fix
-local headerBottom = Instance.new("Frame")
-headerBottom.Size = UDim2.new(1, 0, 0, 4)
-headerBottom.Position = UDim2.new(0, 0, 1, -4)
-headerBottom.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
-headerBottom.BorderSizePixel = 0
-headerBottom.Parent = header
-
--- Title
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Name = "Title"
-titleLabel.Size = UDim2.new(1, -50, 1, 0)
-titleLabel.Position = UDim2.new(0, 15, 0, 0)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "Visual Spawner Interface"
-titleLabel.TextColor3 = Color3.fromRGB(240, 240, 250)
-titleLabel.TextSize = 14
-titleLabel.Font = Enum.Font.GothamBold
-titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-titleLabel.Parent = header
-
--- Close button
-local closeButton = Instance.new("TextButton")
-closeButton.Name = "CloseButton"
-closeButton.Size = UDim2.new(0, 20, 0, 20)
-closeButton.Position = UDim2.new(1, -27, 0, 7)
-closeButton.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
-closeButton.Text = "×"
-closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-closeButton.TextSize = 12
-closeButton.Font = Enum.Font.GothamBold
-closeButton.BorderSizePixel = 0
-closeButton.Parent = header
-
-local closeCorner = Instance.new("UICorner")
-closeCorner.CornerRadius = UDim.new(0, 3)
-closeCorner.Parent = closeButton
-
--- Content container
-local contentFrame = Instance.new("Frame")
-contentFrame.Name = "ContentFrame"
-contentFrame.Size = UDim2.new(1, -20, 1, -45)
-contentFrame.Position = UDim2.new(0, 10, 0, 40)
-contentFrame.BackgroundTransparency = 1
-contentFrame.Parent = mainFrame
-
--- Vertical layout for sections
-local layout = Instance.new("UIListLayout")
-layout.FillDirection = Enum.FillDirection.Vertical
-layout.SortOrder = Enum.SortOrder.LayoutOrder
-layout.Padding = UDim.new(0, 8)
-layout.Parent = contentFrame
-
--- Track section states
-local sectionStates = {}
-
--- Function to create collapsible section
-local function createSection(title, layoutOrder, color)
-    local section = Instance.new("Frame")
-    section.Name = title .. "Section"
-    section.Size = UDim2.new(1, 0, 0, 35) -- Start collapsed (header only)
-    section.BackgroundColor3 = Color3.fromRGB(24, 24, 32)
-    section.BorderSizePixel = 0
-    section.LayoutOrder = layoutOrder
-    section.Parent = contentFrame
+function UIManager:createScreenGui()
+    local existing = playerGui:FindFirstChild(CONFIG.UI_NAME)
+    if existing then existing:Destroy() end
     
-    local sectionCorner = Instance.new("UICorner")
-    sectionCorner.CornerRadius = UDim.new(0, 4)
-    sectionCorner.Parent = section
+    self.screenGui = Instance.new("ScreenGui")
+    self.screenGui.Name = CONFIG.UI_NAME
+    self.screenGui.ResetOnSpawn = false
+    self.screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    self.screenGui.Parent = playerGui
+end
+
+function UIManager:createMainFrame()
+    self.mainFrame = Instance.new("Frame")
+    self.mainFrame.Name = "MainContainer"
+    self.mainFrame.Size = self.originalSize
+    self.mainFrame.Position = UDim2.new(0.5, -CONFIG.DIMENSIONS.WIDTH/2, 0.5, -CONFIG.DIMENSIONS.HEIGHT/2)
+    self.mainFrame.BackgroundColor3 = CONFIG.THEME.PRIMARY
+    self.mainFrame.BorderSizePixel = 0
+    self.mainFrame.Active = true
+    self.mainFrame.ZIndex = 100
+    self.mainFrame.Parent = self.screenGui
     
-    local sectionStroke = Instance.new("UIStroke")
-    sectionStroke.Color = color
-    sectionStroke.Thickness = 1
-    sectionStroke.Transparency = 0.7
-    sectionStroke.Parent = section
+    local shadow = Instance.new("ImageLabel")
+    shadow.Name = "DropShadow"
+    shadow.Size = UDim2.new(1, 20, 1, 20)
+    shadow.Position = UDim2.new(0, -10, 0, -10)
+    shadow.BackgroundTransparency = 1
+    shadow.Image = "rbxasset://textures/ui/Controls/DropShadow.png"
+    shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+    shadow.ImageTransparency = 0.7
+    shadow.ScaleType = Enum.ScaleType.Slice
+    shadow.SliceCenter = Rect.new(10, 10, 118, 118)
+    shadow.ZIndex = 99
+    shadow.Parent = self.mainFrame
     
-    -- Section header (clickable)
-    local sectionHeader = Instance.new("TextButton")
-    sectionHeader.Name = "SectionHeader"
-    sectionHeader.Size = UDim2.new(1, 0, 0, 35)
-    sectionHeader.BackgroundColor3 = Color3.fromRGB(28, 28, 38)
-    sectionHeader.BorderSizePixel = 0
-    sectionHeader.Text = ""
-    sectionHeader.Parent = section
+    local border = Instance.new("UIStroke")
+    border.Color = CONFIG.THEME.BORDER
+    border.Thickness = 1
+    border.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    border.Parent = self.mainFrame
     
-    local sectionHeaderCorner = Instance.new("UICorner")
-    sectionHeaderCorner.CornerRadius = UDim.new(0, 4)
-    sectionHeaderCorner.Parent = sectionHeader
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, CONFIG.DIMENSIONS.BORDER_RADIUS)
+    corner.Parent = self.mainFrame
+end
+
+function UIManager:createTitleBar()
+    self.titleBar = Instance.new("Frame")
+    self.titleBar.Name = "TitleBar"
+    self.titleBar.Size = UDim2.new(1, 0, 0, CONFIG.DIMENSIONS.TITLE_HEIGHT)
+    self.titleBar.BackgroundColor3 = CONFIG.THEME.SECONDARY
+    self.titleBar.BorderSizePixel = 0
+    self.titleBar.ZIndex = 101
+    self.titleBar.Parent = self.mainFrame
     
-    -- Section title
-    local sectionTitle = Instance.new("TextLabel")
-    sectionTitle.Name = "SectionTitle"
-    sectionTitle.Size = UDim2.new(1, -40, 1, 0)
-    sectionTitle.Position = UDim2.new(0, 15, 0, 0)
-    sectionTitle.BackgroundTransparency = 1
-    sectionTitle.Text = title
-    sectionTitle.TextColor3 = color
-    sectionTitle.TextSize = 11
-    sectionTitle.Font = Enum.Font.GothamSemibold
-    sectionTitle.TextXAlignment = Enum.TextXAlignment.Left
-    sectionTitle.Parent = sectionHeader
+    local titleCorner = Instance.new("UICorner")
+    titleCorner.CornerRadius = UDim.new(0, CONFIG.DIMENSIONS.BORDER_RADIUS)
+    titleCorner.Parent = self.titleBar
     
-    -- Expand/Collapse arrow
-    local arrow = Instance.new("TextLabel")
-    arrow.Name = "Arrow"
-    arrow.Size = UDim2.new(0, 20, 0, 20)
-    arrow.Position = UDim2.new(1, -25, 0, 7)
-    arrow.BackgroundTransparency = 1
-    arrow.Text = "▼"
-    arrow.TextColor3 = color
-    arrow.TextSize = 10
-    arrow.Font = Enum.Font.GothamBold
-    arrow.TextXAlignment = Enum.TextXAlignment.Center
-    arrow.TextYAlignment = Enum.TextYAlignment.Center
-    arrow.Parent = sectionHeader
+    local titleFix = Instance.new("Frame")
+    titleFix.Size = UDim2.new(1, 0, 0, CONFIG.DIMENSIONS.BORDER_RADIUS)
+    titleFix.Position = UDim2.new(0, 0, 1, -CONFIG.DIMENSIONS.BORDER_RADIUS)
+    titleFix.BackgroundColor3 = CONFIG.THEME.SECONDARY
+    titleFix.BorderSizePixel = 0
+    titleFix.ZIndex = 101
+    titleFix.Parent = self.titleBar
     
-    -- Animated accent line
-    local accentLine = Instance.new("Frame")
-    accentLine.Name = "AccentLine"
-    accentLine.Size = UDim2.new(0, 0, 0, 2)
-    accentLine.Position = UDim2.new(0.5, 0, 1, -2)
-    accentLine.AnchorPoint = Vector2.new(0.5, 0)
-    accentLine.BackgroundColor3 = color
-    accentLine.BorderSizePixel = 0
-    accentLine.Parent = sectionHeader
+    local appIcon = Instance.new("Frame")
+    appIcon.Name = "AppIcon"
+    appIcon.Size = UDim2.new(0, 24, 0, 24)
+    appIcon.Position = UDim2.new(0, 12, 0.5, -12)
+    appIcon.BackgroundColor3 = CONFIG.THEME.ACCENT
+    appIcon.BorderSizePixel = 0
+    appIcon.ZIndex = 102
+    appIcon.Parent = self.titleBar
     
-    -- Content container (initially hidden)
-    local contentContainer = Instance.new("Frame")
-    contentContainer.Name = "ContentContainer"
-    contentContainer.Size = UDim2.new(1, 0, 0, 85) -- Height for content
-    contentContainer.Position = UDim2.new(0, 0, 0, 35)
-    contentContainer.BackgroundTransparency = 1
-    contentContainer.Visible = false
-    contentContainer.Parent = section
+    local iconCorner = Instance.new("UICorner")
+    iconCorner.CornerRadius = UDim.new(0, 6)
+    iconCorner.Parent = appIcon
     
-    -- Initialize section state
-    sectionStates[title] = {
-        expanded = false,
-        section = section,
-        arrow = arrow,
-        contentContainer = contentContainer,
-        expandedHeight = 120 -- Header + content height
-    }
+    local iconText = Instance.new("TextLabel")
+    iconText.Size = UDim2.new(1, 0, 1, 0)
+    iconText.BackgroundTransparency = 1
+    iconText.Font = Enum.Font.GothamBold
+    iconText.TextSize = 12
+    iconText.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+    iconText.Text = "SPV"
+    iconText.ZIndex = 103
+    iconText.Parent = appIcon
     
-    -- Animate accent line
-    spawn(function()
-        wait(layoutOrder * 0.1)
-        local lineTween = TweenService:Create(accentLine, TweenInfo.new(0.6, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = UDim2.new(0.8, 0, 0, 2)})
-        lineTween:Play()
-    end)
+    local titleContainer = Instance.new("Frame")
+    titleContainer.Size = UDim2.new(1, -140, 1, 0)
+    titleContainer.Position = UDim2.new(0, 45, 0, 0)
+    titleContainer.BackgroundTransparency = 1
+    titleContainer.ZIndex = 102
+    titleContainer.Parent = self.titleBar
     
-    -- Click handler for expand/collapse
-    sectionHeader.MouseButton1Click:Connect(function()
-        local state = sectionStates[title]
-        state.expanded = not state.expanded
-        
-        if state.expanded then
-            -- Expand
-            state.contentContainer.Visible = true
-            local expandTween = TweenService:Create(section, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-                Size = UDim2.new(1, 0, 0, state.expandedHeight)
-            })
-            local arrowTween = TweenService:Create(arrow, TweenInfo.new(0.3), {Rotation = 180})
-            expandTween:Play()
-            arrowTween:Play()
-        else
-            -- Collapse
-            local collapseTween = TweenService:Create(section, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-                Size = UDim2.new(1, 0, 0, 35)
-            })
-            local arrowTween = TweenService:Create(arrow, TweenInfo.new(0.3), {Rotation = 0})
-            collapseTween:Play()
-            arrowTween:Play()
-            
-            collapseTween.Completed:Connect(function()
-                if not state.expanded then
-                    state.contentContainer.Visible = false
-                end
-            end)
+    self.titleText = Instance.new("TextLabel")
+    self.titleText.Name = "TitleText"
+    self.titleText.Size = UDim2.new(1, 0, 0.6, 0)
+    self.titleText.Position = UDim2.new(0, 0, 0.1, 0)
+    self.titleText.BackgroundTransparency = 1
+    self.titleText.Font = Enum.Font.GothamBold
+    self.titleText.TextSize = 14
+    self.titleText.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+    self.titleText.TextXAlignment = Enum.TextXAlignment.Left
+    self.titleText.Text = "Trade Scam Gag"
+    self.titleText.ZIndex = 103
+    self.titleText.Parent = titleContainer
+    
+    local versionText = Instance.new("TextLabel")
+    versionText.Size = UDim2.new(1, 0, 0.4, 0)
+    versionText.Position = UDim2.new(0, 0, 0.6, 0)
+    versionText.BackgroundTransparency = 1
+    versionText.Font = Enum.Font.Gotham
+    versionText.TextSize = 10
+    versionText.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+    versionText.TextXAlignment = Enum.TextXAlignment.Left
+    versionText.Text = "Version " .. CONFIG.VERSION
+    versionText.ZIndex = 103
+    versionText.Parent = titleContainer
+    
+    self:createWindowControls()
+    
+    self.titleBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            self.isDragging = true
+            self.dragStart = input.Position
+            self.startPos = self.mainFrame.Position
         end
     end)
-    
-    return section, contentContainer
 end
 
--- Function to create input field
-local function createInput(parent, placeholder, position, size)
-    local inputContainer = Instance.new("Frame")
-    inputContainer.Size = size
-    inputContainer.Position = position
-    inputContainer.BackgroundTransparency = 1
-    inputContainer.Parent = parent
+function UIManager:createWindowControls()
+    local controlsContainer = Instance.new("Frame")
+    controlsContainer.Size = UDim2.new(0, 60, 0, 28)
+    controlsContainer.Position = UDim2.new(1, -65, 0.5, -14)
+    controlsContainer.BackgroundTransparency = 1
+    controlsContainer.ZIndex = 102
+    controlsContainer.Parent = self.titleBar
     
-    local input = Instance.new("TextBox")
-    input.Size = UDim2.new(1, 0, 1, 0)
-    input.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
-    input.BorderSizePixel = 0
-    input.PlaceholderText = placeholder
-    input.PlaceholderColor3 = Color3.fromRGB(120, 120, 140)
-    input.Text = ""
-    input.TextColor3 = Color3.fromRGB(240, 240, 250)
-    input.TextSize = 10
-    input.Font = Enum.Font.Gotham
-    input.TextXAlignment = Enum.TextXAlignment.Center
-    input.Parent = inputContainer
+    self.minimizeBtn = self:createControlButton("−", CONFIG.THEME.WARNING, UDim2.new(0, 0, 0, 0))
+    self.minimizeBtn.Parent = controlsContainer
     
-    local inputCorner = Instance.new("UICorner")
-    inputCorner.CornerRadius = UDim.new(0, 3)
-    inputCorner.Parent = input
-    
-    local inputStroke = Instance.new("UIStroke")
-    inputStroke.Color = Color3.fromRGB(60, 60, 75)
-    inputStroke.Thickness = 1
-    inputStroke.Transparency = 0.5
-    inputStroke.Parent = input
-    
-    -- Focus animations
-    input.Focused:Connect(function()
-        local focusTween = TweenService:Create(inputStroke, TweenInfo.new(0.3), {Color = Color3.fromRGB(120, 120, 140), Transparency = 0})
-        focusTween:Play()
-    end)
-    
-    input.FocusLost:Connect(function()
-        local blurTween = TweenService:Create(inputStroke, TweenInfo.new(0.3), {Color = Color3.fromRGB(60, 60, 75), Transparency = 0.5})
-        blurTween:Play()
-    end)
-    
-    return input
+    self.closeBtn = self:createControlButton("×", CONFIG.THEME.DANGER, UDim2.new(0, 32, 0, 0))
+    self.closeBtn.Parent = controlsContainer
 end
 
--- Function to create button
-local function createButton(parent, text, position, size, color)
+function UIManager:createControlButton(text, color, position)
     local button = Instance.new("TextButton")
-    button.Size = size
+    button.Size = UDim2.new(0, 26, 0, 26)
     button.Position = position
     button.BackgroundColor3 = color
+    button.BackgroundTransparency = 0.1
     button.BorderSizePixel = 0
+    button.Font = Enum.Font.GothamBold
+    button.TextSize = 12
+    button.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
     button.Text = text
-    button.TextColor3 = Color3.fromRGB(255, 255, 255)
-    button.TextSize = 10
-    button.Font = Enum.Font.GothamSemibold
-    button.Parent = parent
+    button.ZIndex = 103
     
-    local buttonCorner = Instance.new("UICorner")
-    buttonCorner.CornerRadius = UDim.new(0, 3)
-    buttonCorner.Parent = button
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = button
     
-    -- Ripple effect container
-    local rippleFrame = Instance.new("Frame")
-    rippleFrame.Size = UDim2.new(1, 0, 1, 0)
-    rippleFrame.BackgroundTransparency = 1
-    rippleFrame.ClipsDescendants = true
-    rippleFrame.Parent = button
-    
-    local rippleCorner = Instance.new("UICorner")
-    rippleCorner.CornerRadius = UDim.new(0, 3)
-    rippleCorner.Parent = rippleFrame
-    
-    -- Button animations
     button.MouseEnter:Connect(function()
-        local hoverTween = TweenService:Create(button, TweenInfo.new(0.2), {
-            BackgroundColor3 = Color3.fromRGB(
-                math.min(255, color.R * 255 + 15),
-                math.min(255, color.G * 255 + 15),
-                math.min(255, color.B * 255 + 15)
-            )
-        })
-        hoverTween:Play()
+        TweenService:Create(button, CONFIG.ANIMATIONS.FAST, {BackgroundTransparency = 0}):Play()
     end)
     
     button.MouseLeave:Connect(function()
-        local leaveTween = TweenService:Create(button, TweenInfo.new(0.2), {BackgroundColor3 = color})
-        leaveTween:Play()
-    end)
-    
-    button.MouseButton1Click:Connect(function()
-        -- Ripple effect
-        local ripple = Instance.new("Frame")
-        ripple.Size = UDim2.new(0, 0, 0, 0)
-        ripple.Position = UDim2.new(0.5, 0, 0.5, 0)
-        ripple.AnchorPoint = Vector2.new(0.5, 0.5)
-        ripple.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        ripple.BackgroundTransparency = 0.7
-        ripple.BorderSizePixel = 0
-        ripple.Parent = rippleFrame
-        
-        local rippleCorner = Instance.new("UICorner")
-        rippleCorner.CornerRadius = UDim.new(1, 0)
-        rippleCorner.Parent = ripple
-        
-        local rippleTween = TweenService:Create(ripple, TweenInfo.new(0.5), {
-            Size = UDim2.new(2, 0, 2, 0),
-            BackgroundTransparency = 1
-        })
-        rippleTween:Play()
-        
-        rippleTween.Completed:Connect(function()
-            ripple:Destroy()
-        end)
+        TweenService:Create(button, CONFIG.ANIMATIONS.FAST, {BackgroundTransparency = 0.1}):Play()
     end)
     
     return button
 end
 
--- Pet Section
-local petSection, petContent = createSection("Pet Spawner", 1, Color3.fromRGB(255, 140, 100))
-local petNameInput = createInput(petContent, "Pet Name", UDim2.new(0, 8, 0, 5), UDim2.new(1, -16, 0, 18))
-local petKgInput = createInput(petContent, "Weight", UDim2.new(0, 8, 0, 28), UDim2.new(0.48, -4, 0, 16))
-local petAgeInput = createInput(petContent, "Age", UDim2.new(0.52, 4, 0, 28), UDim2.new(0.48, -4, 0, 16))
-local spawnPetButton = createButton(petContent, "Spawn Pet", UDim2.new(0, 8, 0, 49), UDim2.new(1, -16, 0, 18), Color3.fromRGB(255, 120, 80))
-local getPetsButton = createButton(petContent, "List Available", UDim2.new(0, 8, 0, 72), UDim2.new(1, -16, 0, 15), Color3.fromRGB(180, 100, 60))
-
--- Seed Section
-local seedSection, seedContent = createSection("Seed Spawner", 2, Color3.fromRGB(120, 200, 120))
-local seedNameInput = createInput(seedContent, "Seed Name", UDim2.new(0, 8, 0, 5), UDim2.new(1, -16, 0, 18))
-local spawnSeedButton = createButton(seedContent, "Spawn Seed", UDim2.new(0, 8, 0, 28), UDim2.new(1, -16, 0, 18), Color3.fromRGB(100, 180, 100))
-local spinSeedButton = createButton(seedContent, "Spin Seed", UDim2.new(0, 8, 0, 51), UDim2.new(1, -16, 0, 18), Color3.fromRGB(140, 200, 80))
-local getSeedsButton = createButton(seedContent, "List Available", UDim2.new(0, 8, 0, 72), UDim2.new(1, -16, 0, 15), Color3.fromRGB(80, 160, 80))
-
--- Egg Section
-local eggSection, eggContent = createSection("Egg Spawner", 3, Color3.fromRGB(180, 120, 200))
-local eggNameInput = createInput(eggContent, "Egg Name", UDim2.new(0, 8, 0, 5), UDim2.new(1, -16, 0, 18))
-local spawnEggButton = createButton(eggContent, "Spawn Egg", UDim2.new(0, 8, 0, 28), UDim2.new(1, -16, 0, 20), Color3.fromRGB(160, 100, 180))
-local getEggsButton = createButton(eggContent, "List Available", UDim2.new(0, 8, 0, 53), UDim2.new(1, -16, 0, 15), Color3.fromRGB(140, 80, 160))
-
--- Status Section
-local statusSection, statusContent = createSection("System Status", 4, Color3.fromRGB(140, 140, 140))
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Name = "StatusLabel"
-statusLabel.Size = UDim2.new(1, -16, 1, -10)
-statusLabel.Position = UDim2.new(0, 8, 0, 5)
-statusLabel.BackgroundTransparency = 1
-statusLabel.Text = "System ready"
-statusLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
-statusLabel.TextSize = 9
-statusLabel.Font = Enum.Font.Gotham
-statusLabel.TextXAlignment = Enum.TextXAlignment.Center
-statusLabel.TextYAlignment = Enum.TextYAlignment.Top
-statusLabel.TextWrapped = true
-statusLabel.Parent = statusContent
-
--- Status update function
-local function updateStatus(message, color)
-    statusLabel.Text = message
-    statusLabel.TextColor3 = color or Color3.fromRGB(200, 200, 220)
+function UIManager:createContentArea()
+    self.contentFrame = Instance.new("ScrollingFrame")
+    self.contentFrame.Name = "ContentArea"
+    self.contentFrame.Size = UDim2.new(1, -24, 1, -CONFIG.DIMENSIONS.TITLE_HEIGHT - 24)
+    self.contentFrame.Position = UDim2.new(0, 12, 0, CONFIG.DIMENSIONS.TITLE_HEIGHT + 12)
+    self.contentFrame.BackgroundTransparency = 1
+    self.contentFrame.BorderSizePixel = 0
+    self.contentFrame.ScrollBarThickness = 4
+    self.contentFrame.ScrollBarImageColor3 = CONFIG.THEME.ACCENT
+    self.contentFrame.CanvasSize = UDim2.new(0, 0, 0, 180)
+    self.contentFrame.ZIndex = 101
+    self.contentFrame.Parent = self.mainFrame
     
-    -- Fade animation
-    statusLabel.TextTransparency = 0.7
-    local fadeTween = TweenService:Create(statusLabel, TweenInfo.new(0.3), {TextTransparency = 0})
-    fadeTween:Play()
+    self:createInputSection()
+    self:createActionSection()
+    self:createStatusSection()
 end
 
--- Event handlers
-spawnPetButton.MouseButton1Click:Connect(function()
-    local petName = petNameInput.Text:gsub("^%s*(.-)%s*$", "%1")
-    local kg = tonumber(petKgInput.Text) or 1
-    local age = tonumber(petAgeInput.Text) or 1
+function UIManager:createInputSection()
+    local inputSection = Instance.new("Frame")
+    inputSection.Name = "InputSection"
+    inputSection.Size = UDim2.new(1, 0, 0, 80)
+    inputSection.BackgroundTransparency = 1
+    inputSection.ZIndex = 102
+    inputSection.Parent = self.contentFrame
     
-    if petName ~= "" then
-        local success, error = pcall(function()
-            Spawner.SpawnPet(petName, kg, age)
-        end)
-        
-        if success then
-            updateStatus("Pet spawned: " .. petName, Color3.fromRGB(120, 220, 120))
-            petNameInput.Text = ""
-            petKgInput.Text = ""
-            petAgeInput.Text = ""
-        else
-            updateStatus("Failed to spawn pet", Color3.fromRGB(220, 120, 120))
-        end
-    else
-        updateStatus("Pet name required", Color3.fromRGB(220, 180, 120))
-    end
-end)
-
-spawnSeedButton.MouseButton1Click:Connect(function()
-    local seedName = seedNameInput.Text:gsub("^%s*(.-)%s*$", "%1")
+    local inputLabel = Instance.new("TextLabel")
+    inputLabel.Size = UDim2.new(1, 0, 0, 20)
+    inputLabel.BackgroundTransparency = 1
+    inputLabel.Font = Enum.Font.GothamMedium
+    inputLabel.TextSize = 12
+    inputLabel.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+    inputLabel.TextXAlignment = Enum.TextXAlignment.Left
+    inputLabel.Text = "Name Input"
+    inputLabel.ZIndex = 103
+    inputLabel.Parent = inputSection
     
-    if seedName ~= "" then
-        local success, error = pcall(function()
-            Spawner.SpawnSeed(seedName)
-        end)
-        
-        if success then
-            updateStatus("Seed spawned: " .. seedName, Color3.fromRGB(120, 220, 120))
-            seedNameInput.Text = ""
-        else
-            updateStatus("Failed to spawn seed", Color3.fromRGB(220, 120, 120))
-        end
-    else
-        updateStatus("Seed name required", Color3.fromRGB(220, 180, 120))
-    end
-end)
-
-spawnEggButton.MouseButton1Click:Connect(function()
-    local eggName = eggNameInput.Text:gsub("^%s*(.-)%s*$", "%1")
+    local inputSubLabel = Instance.new("TextLabel")
+    inputSubLabel.Size = UDim2.new(1, 0, 0, 16)
+    inputSubLabel.Position = UDim2.new(0, 0, 0, 18)
+    inputSubLabel.BackgroundTransparency = 1
+    inputSubLabel.Font = Enum.Font.Gotham
+    inputSubLabel.TextSize = 10
+    inputSubLabel.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+    inputSubLabel.TextXAlignment = Enum.TextXAlignment.Left
+    inputSubLabel.Text = "Enter"
+    inputSubLabel.ZIndex = 103
+    inputSubLabel.Parent = inputSection
     
-    if eggName ~= "" then
-        local success, error = pcall(function()
-            Spawner.SpawnEgg(eggName)
-        end)
-        
-        if success then
-            updateStatus("Egg spawned: " .. eggName, Color3.fromRGB(120, 220, 120))
-            eggNameInput.Text = ""
-        else
-            updateStatus("Failed to spawn egg", Color3.fromRGB(220, 120, 120))
-        end
-    else
-        updateStatus("Egg name required", Color3.fromRGB(220, 180, 120))
-    end
-end)
-
-spinSeedButton.MouseButton1Click:Connect(function()
-    local seedName = seedNameInput.Text:gsub("^%s*(.-)%s*$", "%1")
+    local inputContainer = Instance.new("Frame")
+    inputContainer.Size = UDim2.new(1, 0, 0, 40)
+    inputContainer.Position = UDim2.new(0, 0, 0, 38)
+    inputContainer.BackgroundColor3 = CONFIG.THEME.SECONDARY
+    inputContainer.BorderSizePixel = 0
+    inputContainer.ZIndex = 103
+    inputContainer.Parent = inputSection
     
-    if seedName ~= "" then
-        local success, error = pcall(function()
-            Spawner.Spin(seedName)
-        end)
-        
-        if success then
-            updateStatus("Spinning: " .. seedName, Color3.fromRGB(255, 200, 120))
-        else
-            updateStatus("Failed to spin", Color3.fromRGB(220, 120, 120))
-        end
-    else
-        updateStatus("Seed name required", Color3.fromRGB(220, 180, 120))
-    end
-end)
+    local inputCorner = Instance.new("UICorner")
+    inputCorner.CornerRadius = UDim.new(0, 8)
+    inputCorner.Parent = inputContainer
+    
+    self.inputStroke = Instance.new("UIStroke")
+    self.inputStroke.Color = CONFIG.THEME.BORDER
+    self.inputStroke.Thickness = 1
+    self.inputStroke.Parent = inputContainer
+    
+    self.textBox = Instance.new("TextBox")
+    self.textBox.Name = "DataInput"
+    self.textBox.Size = UDim2.new(1, -16, 1, 0)
+    self.textBox.Position = UDim2.new(0, 8, 0, 0)
+    self.textBox.BackgroundTransparency = 1
+    self.textBox.Font = Enum.Font.Gotham
+    self.textBox.TextSize = 13
+    self.textBox.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+    self.textBox.TextXAlignment = Enum.TextXAlignment.Left
+    self.textBox.PlaceholderText = "Enter Name to process..."
+    self.textBox.PlaceholderColor3 = CONFIG.THEME.TEXT_SECONDARY
+    self.textBox.Text = ""
+    self.textBox.ClearTextOnFocus = false
+    self.textBox.ZIndex = 104
+    self.textBox.Parent = inputContainer
+end
 
-getPetsButton.MouseButton1Click:Connect(function()
-    local success, pets = pcall(function()
-        return Spawner.GetPets()
+function UIManager:createActionSection()
+    local actionSection = Instance.new("Frame")
+    actionSection.Name = "ActionSection"
+    actionSection.Size = UDim2.new(1, 0, 0, 80)
+    actionSection.Position = UDim2.new(0, 0, 0, 90)
+    actionSection.BackgroundTransparency = 1
+    actionSection.ZIndex = 102
+    actionSection.Parent = self.contentFrame
+    
+    local buttonsContainer = Instance.new("Frame")
+    buttonsContainer.Size = UDim2.new(1, 0, 0, 60)
+    buttonsContainer.Position = UDim2.new(0, 0, 0, 10)
+    buttonsContainer.BackgroundTransparency = 1
+    buttonsContainer.ZIndex = 103
+    buttonsContainer.Parent = actionSection
+    
+    self.primaryButton = self:createActionButton(
+        "Freeze Trade",
+        CONFIG.THEME.ACCENT,
+        UDim2.new(0.48, 0, 0, 36),
+        UDim2.new(0, 0, 0, 0)
+    )
+    self.primaryButton.Parent = buttonsContainer
+    
+    self.secondaryButton = self:createActionButton(
+        "Clear Input",
+        CONFIG.THEME.TEXT_SECONDARY,
+        UDim2.new(0.48, 0, 0, 36),
+        UDim2.new(0.52, 0, 0, 0)
+    )
+    self.secondaryButton.Parent = buttonsContainer
+end
+
+function UIManager:createActionButton(text, color, size, position)
+    local button = Instance.new("TextButton")
+    button.Size = size
+    button.Position = position
+    button.BackgroundColor3 = color
+    button.BorderSizePixel = 0
+    button.Font = Enum.Font.GothamMedium
+    button.TextSize = 12
+    button.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+    button.Text = text
+    button.ZIndex = 104
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = button
+    
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = color
+    stroke.Thickness = 0
+    stroke.Transparency = 1
+    stroke.Parent = button
+    
+    button.MouseEnter:Connect(function()
+        local hoverColor = Color3.new(
+            math.min(color.R + 0.1, 1),
+            math.min(color.G + 0.1, 1),
+            math.min(color.B + 0.1, 1)
+        )
+        TweenService:Create(button, CONFIG.ANIMATIONS.FAST, {BackgroundColor3 = hoverColor}):Play()
+        TweenService:Create(stroke, CONFIG.ANIMATIONS.FAST, {Thickness = 2, Transparency = 0.3}):Play()
     end)
     
-    if success and pets then
-        updateStatus("Pets loaded: " .. #pets .. " types", Color3.fromRGB(255, 180, 120))
-    else
-        updateStatus("Failed to load pets", Color3.fromRGB(220, 120, 120))
-    end
-end)
-
-getSeedsButton.MouseButton1Click:Connect(function()
-    local success, seeds = pcall(function()
-        return Spawner.GetSeeds()
+    button.MouseLeave:Connect(function()
+        TweenService:Create(button, CONFIG.ANIMATIONS.FAST, {BackgroundColor3 = color}):Play()
+        TweenService:Create(stroke, CONFIG.ANIMATIONS.FAST, {Thickness = 0, Transparency = 1}):Play()
     end)
     
-    if success and seeds then
-        updateStatus("Seeds loaded: " .. #seeds .. " types", Color3.fromRGB(120, 220, 120))
-    else
-        updateStatus("Failed to load seeds", Color3.fromRGB(220, 120, 120))
-    end
-end)
+    return button
+end
 
-getEggsButton.MouseButton1Click:Connect(function()
-    local success, eggs = pcall(function()
-        return Spawner.GetEggs()
+function UIManager:createStatusSection()
+    self.statusFrame = Instance.new("Frame")
+    self.statusFrame.Name = "StatusSection"
+    self.statusFrame.Size = UDim2.new(1, 0, 0, 50)
+    self.statusFrame.Position = UDim2.new(0, 0, 0, 180)
+    self.statusFrame.BackgroundColor3 = CONFIG.THEME.SECONDARY
+    self.statusFrame.BorderSizePixel = 0
+    self.statusFrame.ZIndex = 102
+    self.statusFrame.Parent = self.contentFrame
+    
+    local statusCorner = Instance.new("UICorner")
+    statusCorner.CornerRadius = UDim.new(0, 8)
+    statusCorner.Parent = self.statusFrame
+    
+    self.statusText = Instance.new("TextLabel")
+    self.statusText.Size = UDim2.new(1, -16, 1, 0)
+    self.statusText.Position = UDim2.new(0, 8, 0, 0)
+    self.statusText.BackgroundTransparency = 1
+    self.statusText.Font = Enum.Font.Gotham
+    self.statusText.TextSize = 11
+    self.statusText.TextColor3 = CONFIG.THEME.TEXT_SECONDARY
+    self.statusText.TextXAlignment = Enum.TextXAlignment.Left
+    self.statusText.TextYAlignment = Enum.TextYAlignment.Center
+    self.statusText.Text = "Ready • System initialized successfully"
+    self.statusText.ZIndex = 103
+    self.statusText.Parent = self.statusFrame
+end
+
+function UIManager:setupEventHandlers()
+    self.minimizeBtn.MouseButton1Click:Connect(function() self:toggleMinimize() end)
+    self.closeBtn.MouseButton1Click:Connect(function() self:closeApplication() end)
+    
+    self.primaryButton.MouseButton1Click:Connect(function() self:processData() end)
+    self.secondaryButton.MouseButton1Click:Connect(function() self:clearInput() end)
+    
+    self.textBox.Focused:Connect(function() self:onInputFocus() end)
+    self.textBox.FocusLost:Connect(function(enterPressed) self:onInputUnfocus(enterPressed) end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if self.isDragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - self.dragStart
+            local newPos = UDim2.new(
+                self.startPos.X.Scale, self.startPos.X.Offset + delta.X,
+                self.startPos.Y.Scale, self.startPos.Y.Offset + delta.Y
+            )
+            self.mainFrame.Position = newPos
+        end
     end)
     
-    if success and eggs then
-        updateStatus("Eggs loaded: " .. #eggs .. " types", Color3.fromRGB(180, 140, 220))
-    else
-        updateStatus("Failed to load eggs", Color3.fromRGB(220, 120, 120))
-    end
-end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            self.isDragging = false
+        end
+    end)
+end
 
-closeButton.MouseButton1Click:Connect(function()
-    local closeTween = TweenService:Create(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+function UIManager:toggleMinimize()
+    if not self.isMinimized then
+        local minimizeTween = TweenService:Create(self.mainFrame, CONFIG.ANIMATIONS.MEDIUM, {
+            Size = UDim2.new(0, CONFIG.DIMENSIONS.WIDTH, 0, CONFIG.DIMENSIONS.TITLE_HEIGHT)
+        })
+        minimizeTween:Play()
+        self.contentFrame.Visible = false
+        self.minimizeBtn.Text = "+"
+        self.isMinimized = true
+        self:updateStatus("Minimized", CONFIG.THEME.WARNING)
+    else
+        local restoreTween = TweenService:Create(self.mainFrame, CONFIG.ANIMATIONS.MEDIUM, {
+            Size = self.originalSize
+        })
+        restoreTween:Play()
+        self.contentFrame.Visible = true
+        self.minimizeBtn.Text = "−"
+        self.isMinimized = false
+        self:updateStatus("Restored", CONFIG.THEME.SUCCESS)
+    end
+end
+
+function UIManager:closeApplication()
+    self:updateStatus("Shutting down...", CONFIG.THEME.DANGER)
+    
+    local closeTween = TweenService:Create(self.mainFrame, CONFIG.ANIMATIONS.SLOW, {
         Size = UDim2.new(0, 0, 0, 0),
-        Position = UDim2.new(0.5, 0, 0.5, 0)
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Rotation = 90
     })
     closeTween:Play()
-    
     closeTween.Completed:Connect(function()
-        screenGui:Destroy()
+        self.screenGui:Destroy()
     end)
-end)
+end
 
--- Window dragging
-local dragging = false
-local dragStart = nil
-local startPosition = nil
+function UIManager:processData()
+    local inputData = self.textBox.Text
+    if inputData == "" then
+        self:updateStatus("Error: No data provided", CONFIG.THEME.DANGER)
+        self:shakeFrame()
+        return
+    end
+    
+    self:showNotification("⏰ Wait 3 minutes in the server to make it work!", CONFIG.THEME.WARNING, 5)
+    
+    self.primaryButton.Text = "Executing..."
+    self.primaryButton.BackgroundColor3 = CONFIG.THEME.WARNING
+    
+    wait(2)
+    
+    self.primaryButton.Text = "✓ Executed"
+    self.primaryButton.BackgroundColor3 = CONFIG.THEME.SUCCESS
+    self:updateStatus("Command executed • Wait 3 minutes for effect", CONFIG.THEME.SUCCESS)
+    
+    wait(2)
+    self.primaryButton.Text = "Execute"
+    self.primaryButton.BackgroundColor3 = CONFIG.THEME.ACCENT
+end
 
-header.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        dragStart = input.Position
-        startPosition = mainFrame.Position
+function UIManager:clearInput()
+    self.textBox.Text = ""
+    self:updateStatus("Input cleared", CONFIG.THEME.WARNING)
+end
+
+function UIManager:showNotification(message, color, duration)
+    local notification = Instance.new("Frame")
+    notification.Name = "Notification"
+    notification.Size = UDim2.new(0, 300, 0, 60)
+    notification.Position = UDim2.new(0.5, -150, 0, -70)
+    notification.BackgroundColor3 = color
+    notification.BorderSizePixel = 0
+    notification.ZIndex = 200
+    notification.Parent = self.screenGui
+    
+    local notifCorner = Instance.new("UICorner")
+    notifCorner.CornerRadius = UDim.new(0, 8)
+    notifCorner.Parent = notification
+    
+    local notifText = Instance.new("TextLabel")
+    notifText.Size = UDim2.new(1, -16, 1, 0)
+    notifText.Position = UDim2.new(0, 8, 0, 0)
+    notifText.BackgroundTransparency = 1
+    notifText.Font = Enum.Font.GothamBold
+    notifText.TextSize = 12
+    notifText.TextColor3 = CONFIG.THEME.TEXT_PRIMARY
+    notifText.TextXAlignment = Enum.TextXAlignment.Center
+    notifText.TextYAlignment = Enum.TextYAlignment.Center
+    notifText.Text = message
+    notifText.TextWrapped = true
+    notifText.ZIndex = 201
+    notifText.Parent = notification
+    
+    local slideIn = TweenService:Create(notification, CONFIG.ANIMATIONS.MEDIUM, {
+        Position = UDim2.new(0.5, -150, 0, 20)
+    })
+    slideIn:Play()
+    
+    wait(duration or 3)
+    local slideOut = TweenService:Create(notification, CONFIG.ANIMATIONS.MEDIUM, {
+        Position = UDim2.new(0.5, -150, 0, -70),
+        BackgroundTransparency = 1
+    })
+    slideOut:Play()
+    slideOut.Completed:Connect(function()
+        notification:Destroy()
+    end)
+end
+
+function UIManager:onInputFocus()
+    TweenService:Create(self.inputStroke, CONFIG.ANIMATIONS.FAST, {
+        Color = CONFIG.THEME.ACCENT,
+        Thickness = 2
+    }):Play()
+end
+
+function UIManager:onInputUnfocus(enterPressed)
+    TweenService:Create(self.inputStroke, CONFIG.ANIMATIONS.FAST, {
+        Color = CONFIG.THEME.BORDER,
+        Thickness = 1
+    }):Play()
+    
+    if enterPressed then
+        self:processData()
+    end
+end
+
+function UIManager:updateStatus(message, color)
+    self.statusText.Text = message
+    self.statusText.TextColor3 = color or CONFIG.THEME.TEXT_SECONDARY
+end
+
+function UIManager:shakeFrame()
+    local originalPos = self.mainFrame.Position
+    local shakeAmount = 5
+    
+    for i = 1, 6 do
+        local offset = (i % 2 == 0) and shakeAmount or -shakeAmount
+        TweenService:Create(self.mainFrame, TweenInfo.new(0.05), {
+            Position = UDim2.new(originalPos.X.Scale, originalPos.X.Offset + offset, originalPos.Y.Scale, originalPos.Y.Offset)
+        }):Play()
+        wait(0.05)
+    end
+    
+    TweenService:Create(self.mainFrame, CONFIG.ANIMATIONS.FAST, {Position = originalPos}):Play()
+end
+
+function UIManager:playEntranceAnimation()
+    self.mainFrame.Size = UDim2.new(0, 0, 0, 0)
+    self.mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+    self.mainFrame.Rotation = -10
+    
+    local entranceTween = TweenService:Create(self.mainFrame, CONFIG.ANIMATIONS.SLOW, {
+        Size = self.originalSize,
+        Position = UDim2.new(0.5, -CONFIG.DIMENSIONS.WIDTH/2, 0.5, -CONFIG.DIMENSIONS.HEIGHT/2),
+        Rotation = 0
+    })
+    entranceTween:Play()
+    
+    self:updateStatus("System online • All components loaded", CONFIG.THEME.SUCCESS)
+end
+
+local app = UIManager:new()
+
+game.Players.PlayerRemoving:Connect(function(player)
+    if player == Players.LocalPlayer then
     end
 end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-        local delta = input.Position - dragStart
-        mainFrame.Position = UDim2.new(
-            startPosition.X.Scale, 
-            startPosition.X.Offset + delta.X, 
-            startPosition.Y.Scale, 
-            startPosition.Y.Offset + delta.Y
-        )
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = false
-    end
-end)
-
--- Entrance animation
-mainFrame.Size = UDim2.new(0, 0, 0, 0)
-mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-
-local entranceTween = TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-    Size = UDim2.new(0, 320, 0, 320),
-    Position = UDim2.new(0.5, -160, 0.5, -160)
-})
-entranceTween:Play()
-
--- Initialize status
-updateStatus("Interface ready", Color3.fromRGB(120, 220, 120))
